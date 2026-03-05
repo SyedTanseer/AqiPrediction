@@ -1,0 +1,11 @@
+{
+  "model": "Dense-only (Flatten\u219232\u219216\u21928\u21921)",
+  "parameters": 3777,
+  "epochs_trained": 38,
+  "best_epoch": 28,
+  "best_val_loss": 0.23263780772686005,
+  "best_val_mae": 0.351087361574173,
+  "test_loss": 0.16171060502529144,
+  "test_mae": 0.30008411407470703,
+  "seed": 42
+}

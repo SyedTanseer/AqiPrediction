@@ -1,10 +1,28 @@
 """
 Create fully TensorFlow Lite compatible model using Dense layers only
 Flattens time-series input for ESP32 deployment
+
+FIXES APPLIED:
+- Random seeds for reproducibility (Flaw 9)
+- EarlyStopping + ModelCheckpoint (Flaw 10)
+- Training history saved to JSON (Flaw 19)
+- Training curves plotted (Flaw 18)
+- Proper evaluation on test set (Flaw 2)
 """
 import tensorflow as tf
 import numpy as np
 import os
+import json
+import random
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+# Set random seeds for reproducibility
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
 
 def create_dense_model(input_shape=(24, 4)):
     """
@@ -20,11 +38,8 @@ def create_dense_model(input_shape=(24, 4)):
     from tensorflow.keras.layers import Dense, Dropout, Flatten
     from tensorflow.keras.optimizers import Adam
     
-    # Calculate flattened input size
-    flattened_size = input_shape[0] * input_shape[1]  # 24 * 4 = 96
-    
     model = Sequential([
-        # Flatten time-series input
+        # Flatten time-series input (trades temporal structure for TFLite compatibility)
         Flatten(input_shape=input_shape, name='flatten'),
         
         # Dense layers for pattern recognition
@@ -49,8 +64,53 @@ def create_dense_model(input_shape=(24, 4)):
     
     return model
 
+def save_training_history(history, save_path):
+    """Save training history to JSON file"""
+    history_dict = {}
+    for key, values in history.history.items():
+        history_dict[key] = [float(v) for v in values]
+    history_dict['epochs'] = len(history.history['loss'])
+    
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    with open(save_path, 'w') as f:
+        json.dump(history_dict, f, indent=2)
+    print(f"  Training history saved to {save_path}")
+
+def plot_training_curves(history, save_dir):
+    """Plot and save training curves for the Dense model"""
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Loss curve
+    plt.figure(figsize=(10, 5))
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Val Loss')
+    plt.title('Dense Model - Training & Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('MSE Loss')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'dense_loss_curve.png'), dpi=150)
+    plt.close()
+    
+    # MAE curve
+    plt.figure(figsize=(10, 5))
+    plt.plot(history.history['mae'], label='Train MAE')
+    plt.plot(history.history['val_mae'], label='Val MAE')
+    plt.title('Dense Model - Training & Validation MAE')
+    plt.xlabel('Epoch')
+    plt.ylabel('MAE')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'dense_mae_curve.png'), dpi=150)
+    plt.close()
+    
+    print(f"  Training curves saved to {save_dir}/")
+
 def train_dense_model():
-    """Train Dense model for TFLite conversion"""
+    """Train Dense model with proper callbacks and evaluation"""
+    from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
     
     print("🚀 Creating Dense Model for TensorFlow Lite")
     print("=" * 60)
@@ -61,9 +121,12 @@ def train_dense_model():
     y_train = np.load("data/train_y.npy")
     X_val = np.load("data/val_X.npy")
     y_val = np.load("data/val_y.npy")
+    X_test = np.load("data/test_X.npy")
+    y_test = np.load("data/test_y.npy")
     
     print(f"  Train: X{X_train.shape}, y{y_train.shape}")
     print(f"  Val:   X{X_val.shape}, y{y_val.shape}")
+    print(f"  Test:  X{X_test.shape}, y{y_test.shape}")
     
     # Create Dense model
     print("\nCreating Dense model...")
@@ -72,23 +135,71 @@ def train_dense_model():
     print("\nModel Architecture:")
     model.summary()
     
-    # Training
-    print(f"\nTraining Dense model (15 epochs)...")
+    # Create callbacks (FIX: Flaw 10 - add early stopping and checkpointing)
+    os.makedirs("model", exist_ok=True)
+    callbacks = [
+        EarlyStopping(
+            monitor='val_loss',
+            patience=10,
+            restore_best_weights=True,
+            verbose=1
+        ),
+        ModelCheckpoint(
+            filepath='model/best_dense_model.h5',
+            monitor='val_loss',
+            save_best_only=True,
+            verbose=1
+        )
+    ]
+    
+    # Training (FIX: increased max epochs, added callbacks)
+    print(f"\nTraining Dense model (max 50 epochs, patience=10)...")
     history = model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
-        epochs=15,
+        epochs=50,
         batch_size=32,
+        callbacks=callbacks,
         verbose=1
     )
     
-    # Evaluate
-    val_loss = min(history.history['val_loss'])
-    val_mae = min(history.history['val_mae'])
+    # Save training history (FIX: Flaw 19)
+    save_training_history(history, "reports/dense_training_history.json")
+    
+    # Plot training curves
+    plot_training_curves(history, "reports/plots")
+    
+    # FIX: Flaw 18 - report best epoch metrics, not cherry-picked minimums
+    best_epoch = np.argmin(history.history['val_loss'])
+    best_val_loss = history.history['val_loss'][best_epoch]
+    best_val_mae = history.history['val_mae'][best_epoch]
     
     print(f"\nTraining Results:")
-    print(f"  Best Val Loss: {val_loss:.6f}")
-    print(f"  Best Val MAE: {val_mae:.6f}")
+    print(f"  Best Epoch: {best_epoch + 1}")
+    print(f"  Best Val Loss (MSE): {best_val_loss:.6f}")
+    print(f"  Best Val MAE: {best_val_mae:.6f}")
+    
+    # FIX: Flaw 2 - Evaluate the Dense model on the test set and save metrics
+    print(f"\nEvaluating Dense model on TEST set...")
+    test_loss, test_mae = model.evaluate(X_test, y_test, verbose=0)
+    print(f"  Test Loss (MSE): {test_loss:.6f}")
+    print(f"  Test MAE: {test_mae:.6f}")
+    
+    # Save evaluation metrics
+    metrics = {
+        'model': 'Dense-only (Flatten→32→16→8→1)',
+        'parameters': int(model.count_params()),
+        'epochs_trained': len(history.history['loss']),
+        'best_epoch': int(best_epoch + 1),
+        'best_val_loss': float(best_val_loss),
+        'best_val_mae': float(best_val_mae),
+        'test_loss': float(test_loss),
+        'test_mae': float(test_mae),
+        'seed': SEED
+    }
+    with open("reports/dense_model_metrics.json", 'w') as f:
+        json.dump(metrics, f, indent=2)
+    print(f"  Metrics saved to reports/dense_model_metrics.json")
     
     return model
 
@@ -110,7 +221,7 @@ def convert_dense_to_tflite(model):
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
     converter.representative_dataset = representative_dataset
     
-    # Convert (should work with Dense layers)
+    # Convert
     print("  Converting model...")
     try:
         tflite_model = converter.convert()
@@ -120,7 +231,6 @@ def convert_dense_to_tflite(model):
         print(f"  ⚠️  Quantized conversion failed: {e}")
         print("  Trying without representative dataset...")
         
-        # Fallback without quantization
         converter = tf.lite.TFLiteConverter.from_keras_model(model)
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
         tflite_model = converter.convert()
@@ -172,56 +282,11 @@ def validate_tflite_model(tflite_path):
         print(f"  ✓ Test inference successful")
         print(f"  ✓ Sample prediction: {output[0][0]:.6f}")
         
-        # Test multiple samples
-        for i in range(5):
-            test_sample = X_test[i:i+1].astype(np.float32)
-            interpreter.set_tensor(input_details[0]['index'], test_sample)
-            interpreter.invoke()
-            output = interpreter.get_tensor(output_details[0]['index'])
-            print(f"  ✓ Sample {i+1} prediction: {output[0][0]:.6f}")
-        
         return True
         
     except Exception as e:
         print(f"  ❌ Validation failed: {e}")
         return False
-
-def compare_with_original():
-    """Compare Dense model performance with original data"""
-    
-    print(f"\n📊 Performance Comparison...")
-    
-    # Load test data
-    X_test = np.load("data/test_X.npy")
-    y_test = np.load("data/test_y.npy")
-    
-    # Load TFLite model
-    interpreter = tf.lite.Interpreter(model_path="model/dense_model.tflite")
-    interpreter.allocate_tensors()
-    
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    
-    # Run predictions on test set
-    predictions = []
-    for i in range(min(100, len(X_test))):  # Test first 100 samples
-        test_sample = X_test[i:i+1].astype(np.float32)
-        interpreter.set_tensor(input_details[0]['index'], test_sample)
-        interpreter.invoke()
-        output = interpreter.get_tensor(output_details[0]['index'])
-        predictions.append(output[0][0])
-    
-    predictions = np.array(predictions)
-    actual = y_test[:len(predictions)]
-    
-    # Calculate metrics
-    mse = np.mean((predictions - actual) ** 2)
-    mae = np.mean(np.abs(predictions - actual))
-    
-    print(f"  Test MSE: {mse:.6f}")
-    print(f"  Test MAE: {mae:.6f}")
-    
-    return mae
 
 def main():
     """Main pipeline for Dense TFLite model"""
@@ -235,10 +300,6 @@ def main():
     # Validate
     validation_success = validate_tflite_model(tflite_path)
     
-    # Performance comparison
-    if validation_success:
-        test_mae = compare_with_original()
-    
     # Summary
     print("\n" + "=" * 60)
     print("🎉 DENSE TFLITE MODEL SUMMARY")
@@ -247,14 +308,9 @@ def main():
     print(f"\nModel Details:")
     print(f"  • Architecture: Dense layers only (TFLite compatible)")
     print(f"  • Parameters: {model.count_params():,}")
-    print(f"  • Input: Flattened 24×4 = 96 features")
     print(f"  • File: {tflite_path}")
     print(f"  • Size: {model_size_kb:.1f} KB")
     
-    if validation_success:
-        print(f"  • Test MAE: {test_mae:.6f}")
-    
-    print(f"\nESP32 Deployment:")
     if model_size_kb <= 20:
         print(f"  ✓ Size within ESP32 limits ({model_size_kb:.1f} KB ≤ 20 KB)")
     else:
@@ -263,25 +319,9 @@ def main():
     if validation_success:
         print(f"  ✓ Model validation successful")
         print(f"  ✓ Ready for ESP32 deployment")
-        print(f"  ✓ No RNN layers - fully TFLite compatible")
-    else:
-        print(f"  ⚠️  Validation issues detected")
-    
-    print(f"\nNote: Dense model trades some temporal modeling for TFLite compatibility")
-    print(f"Still captures patterns through flattened 24-hour feature windows")
     
     return validation_success
 
 if __name__ == "__main__":
     success = main()
-    
-    if success:
-        print("\n🎉 Step 6 Success Criteria:")
-        print("✔ .tflite model created")
-        print("✔ Model size printed")
-        print("✔ Quantization enabled")
-        print("✔ Representative dataset used")
-        print("✔ Test inference works")
-        print("\n🚀 Ready for Step 7: ESP32 Firmware Integration!")
-    else:
-        print("\n❌ Model creation had issues!")
+    exit(0 if success else 1)

@@ -7,12 +7,19 @@ import matplotlib.pyplot as plt
 import json
 import os
 import sys
+import random
 
 # Add parent directory to path to import model
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from model.gru_model import create_and_compile_model
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 import tensorflow as tf
+
+# Set random seeds for reproducibility (Flaw 9 fix)
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
 
 def load_training_data(data_dir="../data"):
     """

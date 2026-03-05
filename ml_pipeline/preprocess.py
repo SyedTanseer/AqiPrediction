@@ -20,8 +20,8 @@ def handle_missing_values(df):
     # Replace -200 with NaN
     df_clean = df.replace(-200.0, np.nan)
     
-    # Forward fill missing values (appropriate for time series)
-    df_clean = df_clean.ffill()
+    # Forward fill missing values (limit=3 to avoid propagating across long outages)
+    df_clean = df_clean.ffill(limit=3)
     
     # Drop any remaining NaN values at the beginning
     df_clean = df_clean.dropna()
@@ -99,7 +99,11 @@ def normalize_features(df, stats=None):
     for column in df.columns:
         mean = stats[column]['mean']
         std = stats[column]['std']
-        df_norm[column] = (df[column] - mean) / std
+        if std == 0:
+            print(f"  ⚠️ Warning: {column} has std=0, setting normalized values to 0")
+            df_norm[column] = 0.0
+        else:
+            df_norm[column] = (df[column] - mean) / std
     
     return df_norm
 

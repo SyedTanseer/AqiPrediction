@@ -1,11 +1,14 @@
 """
 Feature engineering for time-series air quality data
 Creates sliding windows for GRU model training
+
+FIX: Normalization stats are now computed on TRAINING data only
+to prevent data leakage from validation/test sets.
 """
 import numpy as np
 import pandas as pd
 import yaml
-from sklearn.preprocessing import StandardScaler
+import os
 
 def load_normalization_stats(config_path):
     """
@@ -19,6 +22,41 @@ def load_normalization_stats(config_path):
     """
     with open(config_path, 'r') as f:
         stats = yaml.safe_load(f)
+    return stats
+
+def save_normalization_stats(stats, config_path):
+    """
+    Save normalization statistics to YAML file
+    
+    Args:
+        stats: Dictionary with per-column mean/std
+        config_path: Path to save normalization.yaml
+    """
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, 'w') as f:
+        yaml.dump(stats, f, default_flow_style=False)
+    print(f"Normalization stats saved to {config_path}")
+
+def compute_normalization_stats(df):
+    """
+    Compute normalization statistics from a DataFrame
+    
+    Args:
+        df: DataFrame to compute stats for (should be TRAINING data only)
+        
+    Returns:
+        Dictionary with per-column mean and std
+    """
+    stats = {}
+    for column in df.columns:
+        col_std = float(df[column].std())
+        if col_std == 0:
+            print(f"  ⚠️ Warning: {column} has std=0, using std=1.0 as fallback")
+            col_std = 1.0
+        stats[column] = {
+            'mean': float(df[column].mean()),
+            'std': col_std
+        }
     return stats
 
 def normalize_dataset(df, stats):
@@ -37,7 +75,11 @@ def normalize_dataset(df, stats):
     for column in df.columns:
         mean = stats[column]['mean']
         std = stats[column]['std']
-        df_norm[column] = (df[column] - mean) / std
+        if std == 0:
+            print(f"  ⚠️ Warning: {column} has std=0, setting normalized values to 0")
+            df_norm[column] = 0.0
+        else:
+            df_norm[column] = (df[column] - mean) / std
     
     return df_norm
 
@@ -79,53 +121,38 @@ def create_time_series_windows(data, history_window=24, forecast_horizon=1, targ
     
     return X, y
 
-def chronological_split(X, y, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15):
+def chronological_split(X, y, train_ratio=0.70, val_ratio=0.15):
     """
-    Split time-series data chronologically (no shuffling)
+    Split data chronologically (no shuffling to prevent data leakage)
     
     Args:
-        X: Input features
-        y: Target values
-        train_ratio: Fraction for training
-        val_ratio: Fraction for validation
-        test_ratio: Fraction for testing
+        X: Input features array
+        y: Target values array
+        train_ratio: Proportion for training (0.70)
+        val_ratio: Proportion for validation (0.15)
         
     Returns:
         Tuple of (X_train, X_val, X_test, y_train, y_val, y_test)
     """
-    n_samples = len(X)
+    n = len(X)
+    train_end = int(n * train_ratio)
+    val_end = int(n * (train_ratio + val_ratio))
     
-    # Calculate split indices
-    train_end = int(n_samples * train_ratio)
-    val_end = int(n_samples * (train_ratio + val_ratio))
+    X_train, y_train = X[:train_end], y[:train_end]
+    X_val, y_val = X[train_end:val_end], y[train_end:val_end]
+    X_test, y_test = X[val_end:], y[val_end:]
     
-    # Split chronologically
-    X_train = X[:train_end]
-    X_val = X[train_end:val_end]
-    X_test = X[val_end:]
-    
-    y_train = y[:train_end]
-    y_val = y[train_end:val_end]
-    y_test = y[val_end:]
-    
-    print(f"Train samples: {len(X_train)}")
-    print(f"Validation samples: {len(X_val)}")
-    print(f"Test samples: {len(X_test)}")
+    print(f"\nChronological split (no shuffling):")
+    print(f"  Train: {len(X_train)} samples ({len(X_train)/n:.1%})")
+    print(f"  Val:   {len(X_val)} samples ({len(X_val)/n:.1%})")
+    print(f"  Test:  {len(X_test)} samples ({len(X_test)/n:.1%})")
     
     return X_train, X_val, X_test, y_train, y_val, y_test
 
-def save_processed_arrays(X_train, X_val, X_test, y_train, y_val, y_test, data_dir="data"):
-    """
-    Save processed arrays as .npy files
+def save_processed_arrays(X_train, X_val, X_test, y_train, y_val, y_test, data_dir):
+    """Save all processed arrays to disk"""
+    os.makedirs(data_dir, exist_ok=True)
     
-    Args:
-        X_train, X_val, X_test: Input arrays
-        y_train, y_val, y_test: Target arrays
-        data_dir: Directory to save files
-    """
-    import os
-    
-    # Save all arrays
     np.save(os.path.join(data_dir, "train_X.npy"), X_train)
     np.save(os.path.join(data_dir, "train_y.npy"), y_train)
     np.save(os.path.join(data_dir, "val_X.npy"), X_val)
@@ -133,16 +160,19 @@ def save_processed_arrays(X_train, X_val, X_test, y_train, y_val, y_test, data_d
     np.save(os.path.join(data_dir, "test_X.npy"), X_test)
     np.save(os.path.join(data_dir, "test_y.npy"), y_test)
     
-    print(f"Processed arrays saved to {data_dir}/")
+    print(f"\nArrays saved to {data_dir}/")
 
 def process_time_series_data(csv_path, config_path, data_dir="data", 
                            history_window=24, forecast_horizon=1):
     """
     Complete time-series processing pipeline
     
+    FIX: Normalization stats are computed on TRAINING portion only
+    to prevent data leakage from validation/test sets.
+    
     Args:
         csv_path: Path to clean dataset CSV
-        config_path: Path to normalization.yaml
+        config_path: Path to normalization.yaml (will be overwritten with train-only stats)
         data_dir: Directory to save processed arrays
         history_window: Input sequence length
         forecast_horizon: Prediction horizon
@@ -156,12 +186,24 @@ def process_time_series_data(csv_path, config_path, data_dir="data",
     df = pd.read_csv(csv_path, index_col='datetime', parse_dates=True)
     print(f"Loaded dataset: {df.shape}")
     
-    # Load normalization stats
-    stats = load_normalization_stats(config_path)
+    # ===== FIX: Compute normalization stats on TRAINING portion only =====
+    # Determine the training portion boundary on raw data
+    train_end_idx = int(len(df) * 0.70)
+    df_train_portion = df.iloc[:train_end_idx]
     
-    # Normalize dataset
+    print(f"\nComputing normalization stats on training data only ({train_end_idx} of {len(df)} rows)...")
+    stats = compute_normalization_stats(df_train_portion)
+    
+    # Save train-only stats (overwrites any previously computed full-data stats)
+    save_normalization_stats(stats, config_path)
+    
+    for col, s in stats.items():
+        print(f"  {col}: mean={s['mean']:.4f}, std={s['std']:.4f}")
+    # =====================================================================
+    
+    # Normalize ALL data using train-only stats
     df_norm = normalize_dataset(df, stats)
-    print("Dataset normalized")
+    print("Dataset normalized (using train-only statistics)")
     
     # Create time-series windows
     X, y = create_time_series_windows(df_norm, history_window, forecast_horizon)
@@ -172,21 +214,12 @@ def process_time_series_data(csv_path, config_path, data_dir="data",
     # Save processed arrays
     save_processed_arrays(X_train, X_val, X_test, y_train, y_val, y_test, data_dir)
     
-    print("Time-series processing complete!")
+    print("\nTime-series processing complete!")
     return X_train, X_val, X_test, y_train, y_val, y_test
 
 if __name__ == "__main__":
-    # Process the dataset
-    X_train, X_val, X_test, y_train, y_val, y_test = process_time_series_data(
+    process_time_series_data(
         csv_path="../data/clean_dataset.csv",
         config_path="../config/normalization.yaml",
         data_dir="../data"
     )
-    
-    print("\nFinal shapes:")
-    print(f"X_train: {X_train.shape}")
-    print(f"X_val: {X_val.shape}")
-    print(f"X_test: {X_test.shape}")
-    print(f"y_train: {y_train.shape}")
-    print(f"y_val: {y_val.shape}")
-    print(f"y_test: {y_test.shape}")
