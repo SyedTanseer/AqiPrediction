@@ -1,6 +1,6 @@
 """
-Data preprocessing module for air quality time-series data
-Handles missing values, resampling, and normalization
+Data preprocessing module for air quality data
+Handles missing values and normalization for the Mendeley Indian Cities AQI dataset
 """
 import pandas as pd
 import numpy as np
@@ -9,51 +9,28 @@ import os
 
 def handle_missing_values(df):
     """
-    Convert -200 values to NaN and apply forward fill
+    Drop rows with any NaN values in key columns
     
     Args:
-        df: DataFrame with potential -200 missing values
+        df: DataFrame with potential missing values
         
     Returns:
         DataFrame with missing values handled
     """
-    # Replace -200 with NaN
-    df_clean = df.replace(-200.0, np.nan)
+    before = len(df)
+    df_clean = df.dropna()
+    after = len(df_clean)
     
-    # Forward fill missing values (limit=3 to avoid propagating across long outages)
-    df_clean = df_clean.ffill(limit=3)
+    if before != after:
+        print(f"Dropped {before - after} rows with missing values. Remaining: {after}")
+    else:
+        print(f"No missing values found. All {after} samples retained.")
     
-    # Drop any remaining NaN values at the beginning
-    df_clean = df_clean.dropna()
-    
-    print(f"Missing values handled. Remaining samples: {len(df_clean)}")
     return df_clean
-
-def resample_to_hourly(df):
-    """
-    Ensure hourly sampling and sort by timestamp
-    
-    Args:
-        df: DataFrame with datetime index
-        
-    Returns:
-        DataFrame resampled to hourly frequency
-    """
-    # Sort by timestamp
-    df_sorted = df.sort_index()
-    
-    # Resample to hourly (mean for any sub-hourly data)
-    df_hourly = df_sorted.resample('h').mean()
-    
-    # Drop any NaN values from resampling
-    df_hourly = df_hourly.dropna()
-    
-    print(f"Resampled to hourly: {len(df_hourly)} samples")
-    return df_hourly
 
 def compute_normalization_stats(df, save_path):
     """
-    Compute and save normalization statistics
+    Compute and save normalization statistics (z-score: mean, std)
     
     Args:
         df: DataFrame to compute stats for
@@ -65,9 +42,13 @@ def compute_normalization_stats(df, save_path):
     stats = {}
     
     for column in df.columns:
+        col_std = float(df[column].std())
+        if col_std == 0:
+            print(f"  ⚠️ Warning: {column} has std=0, using std=1.0 as fallback")
+            col_std = 1.0
         stats[column] = {
             'mean': float(df[column].mean()),
-            'std': float(df[column].std())
+            'std': col_std
         }
     
     # Create config directory if it doesn't exist
@@ -109,7 +90,7 @@ def normalize_features(df, stats=None):
 
 def preprocess_dataset(df, config_dir="../config"):
     """
-    Complete preprocessing pipeline
+    Complete preprocessing pipeline for Mendeley AQI dataset
     
     Args:
         df: Raw dataset DataFrame
@@ -123,21 +104,19 @@ def preprocess_dataset(df, config_dir="../config"):
     # Step 1: Handle missing values
     df_clean = handle_missing_values(df)
     
-    # Step 2: Resample to hourly
-    df_hourly = resample_to_hourly(df_clean)
-    
-    # Step 3: Compute normalization stats
+    # Step 2: Compute normalization stats on all data
+    # (train-only split is handled in feature_engineering.py)
     norm_path = os.path.join(config_dir, "normalization.yaml")
-    stats = compute_normalization_stats(df_hourly, norm_path)
+    stats = compute_normalization_stats(df_clean, norm_path)
     
     print("Preprocessing complete!")
-    return df_hourly, stats
+    return df_clean, stats
 
 if __name__ == "__main__":
     from dataset_loader import load_air_quality_dataset
     
     # Load dataset
-    df = load_air_quality_dataset("../data/raw_dataset/AirQualityUCI.csv")
+    df = load_air_quality_dataset("../data/clean_dataset.csv")
     
     # Preprocess
     df_processed, stats = preprocess_dataset(df)

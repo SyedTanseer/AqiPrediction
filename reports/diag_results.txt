@@ -1,0 +1,44 @@
+RAW VALUES (max sliders):
+  CO_GT: 15
+  C6H6_GT: 60
+  NOx_GT: 1500
+  NO2_GT: 300
+  T: 50
+  RH: 100
+  AH: 3
+
+NORMALIZED z-scores:
+  CO_GT: z = 8.82
+  C6H6_GT: z = 6.38
+  NOx_GT: z = 6.55
+  NO2_GT: z = 4.84
+  T: z = 3.69
+  RH: z = 2.96
+  AH: z = 5.09
+
+TRAINING DATA RANGE:
+  CO_GT: [0.10, 11.90]  slider=15  z=8.8
+  C6H6_GT: [0.20, 63.70]  slider=60  z=6.4
+  NOx_GT: [2.00, 1479.00]  slider=1500  z=6.6
+  NO2_GT: [2.00, 333.00]  slider=300  z=4.8
+  T: [-1.90, 44.60]  slider=50  z=3.7
+  RH: [9.20, 88.70]  slider=100  z=3.0
+  AH: [0.18, 2.18]  slider=3  z=5.1
+
+PREDICTION:
+  Normalized output: 2.1727
+  Denormalized CO: 5.30 mg/m3
+  Training CO max: 11.90 mg/m3
+
+WHY AQI IS LOW:
+  AQI breakpoints for CO (EPA):
+    Good (0-50):     CO 0-4.4 mg/m3
+    Moderate (51-100): CO 4.5-9.4 mg/m3
+    USG (101-150):   CO 9.5-12.4 mg/m3
+    Unhealthy (151-200): CO 12.5-15.4 mg/m3
+    Very Unhealthy:  CO 15.5-30.4 mg/m3
+    Hazardous:       CO 30.5-50.4 mg/m3
+
+  Model predicts CO = 5.30 mg/m3
+  But training data CO only goes up to 11.90
+  The model CANNOT predict beyond its training range!

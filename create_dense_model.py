@@ -1,13 +1,9 @@
 """
-Create fully TensorFlow Lite compatible model using Dense layers only
-Flattens time-series input for ESP32 deployment
+Create fully TensorFlow Lite compatible Dense model for AQI prediction
+Input: 6 pollutant features (PM2.5, PM10, NO2, SO2, CO, O3)
+Output: AQI (normalized)
 
-FIXES APPLIED:
-- Random seeds for reproducibility (Flaw 9)
-- EarlyStopping + ModelCheckpoint (Flaw 10)
-- Training history saved to JSON (Flaw 19)
-- Training curves plotted (Flaw 18)
-- Proper evaluation on test set (Flaw 2)
+Trained on Mendeley Indian Cities AQI dataset.
 """
 import tensorflow as tf
 import numpy as np
@@ -24,26 +20,23 @@ random.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
-def create_dense_model(input_shape=(24, 4)):
+def create_dense_model(input_shape=(6,)):
     """
-    Create Dense-only model that's fully TensorFlow Lite compatible
+    Create Dense-only model for AQI prediction, fully TFLite compatible
     
     Args:
-        input_shape: Input tensor shape (timesteps, features)
+        input_shape: Input tensor shape (6 pollutant features)
         
     Returns:
         Compiled Keras model
     """
     from tensorflow.keras.models import Sequential
-    from tensorflow.keras.layers import Dense, Dropout, Flatten
+    from tensorflow.keras.layers import Dense, Dropout
     from tensorflow.keras.optimizers import Adam
     
     model = Sequential([
-        # Flatten time-series input (trades temporal structure for TFLite compatibility)
-        Flatten(input_shape=input_shape, name='flatten'),
-        
         # Dense layers for pattern recognition
-        Dense(32, activation='relu', name='dense1'),
+        Dense(32, activation='relu', input_shape=input_shape, name='dense1'),
         Dropout(0.2, name='dropout1'),
         
         Dense(16, activation='relu', name='dense2'),
@@ -51,7 +44,7 @@ def create_dense_model(input_shape=(24, 4)):
         
         Dense(8, activation='relu', name='dense3'),
         
-        # Output layer
+        # Output layer — single AQI prediction
         Dense(1, activation='linear', name='output')
     ])
     
@@ -84,7 +77,7 @@ def plot_training_curves(history, save_dir):
     plt.figure(figsize=(10, 5))
     plt.plot(history.history['loss'], label='Train Loss')
     plt.plot(history.history['val_loss'], label='Val Loss')
-    plt.title('Dense Model - Training & Validation Loss')
+    plt.title('AQI Dense Model - Training & Validation Loss')
     plt.xlabel('Epoch')
     plt.ylabel('MSE Loss')
     plt.legend()
@@ -97,7 +90,7 @@ def plot_training_curves(history, save_dir):
     plt.figure(figsize=(10, 5))
     plt.plot(history.history['mae'], label='Train MAE')
     plt.plot(history.history['val_mae'], label='Val MAE')
-    plt.title('Dense Model - Training & Validation MAE')
+    plt.title('AQI Dense Model - Training & Validation MAE')
     plt.xlabel('Epoch')
     plt.ylabel('MAE')
     plt.legend()
@@ -112,7 +105,7 @@ def train_dense_model():
     """Train Dense model with proper callbacks and evaluation"""
     from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
     
-    print("🚀 Creating Dense Model for TensorFlow Lite")
+    print("🚀 Creating Dense Model for AQI Prediction (TFLite)")
     print("=" * 60)
     
     # Load training data
@@ -130,17 +123,17 @@ def train_dense_model():
     
     # Create Dense model
     print("\nCreating Dense model...")
-    model = create_dense_model()
+    model = create_dense_model(input_shape=(X_train.shape[1],))
     
     print("\nModel Architecture:")
     model.summary()
     
-    # Create callbacks (FIX: Flaw 10 - add early stopping and checkpointing)
+    # Create callbacks
     os.makedirs("model", exist_ok=True)
     callbacks = [
         EarlyStopping(
             monitor='val_loss',
-            patience=10,
+            patience=20,
             restore_best_weights=True,
             verbose=1
         ),
@@ -152,24 +145,24 @@ def train_dense_model():
         )
     ]
     
-    # Training (FIX: increased max epochs, added callbacks)
-    print(f"\nTraining Dense model (max 50 epochs, patience=10)...")
+    # Training
+    print(f"\nTraining Dense model (max 200 epochs, patience=20)...")
     history = model.fit(
         X_train, y_train,
         validation_data=(X_val, y_val),
-        epochs=50,
-        batch_size=32,
+        epochs=200,
+        batch_size=16,
         callbacks=callbacks,
         verbose=1
     )
     
-    # Save training history (FIX: Flaw 19)
+    # Save training history
     save_training_history(history, "reports/dense_training_history.json")
     
     # Plot training curves
     plot_training_curves(history, "reports/plots")
     
-    # FIX: Flaw 18 - report best epoch metrics, not cherry-picked minimums
+    # Report best epoch metrics
     best_epoch = np.argmin(history.history['val_loss'])
     best_val_loss = history.history['val_loss'][best_epoch]
     best_val_mae = history.history['val_mae'][best_epoch]
@@ -179,7 +172,7 @@ def train_dense_model():
     print(f"  Best Val Loss (MSE): {best_val_loss:.6f}")
     print(f"  Best Val MAE: {best_val_mae:.6f}")
     
-    # FIX: Flaw 2 - Evaluate the Dense model on the test set and save metrics
+    # Evaluate on test set
     print(f"\nEvaluating Dense model on TEST set...")
     test_loss, test_mae = model.evaluate(X_test, y_test, verbose=0)
     print(f"  Test Loss (MSE): {test_loss:.6f}")
@@ -187,7 +180,9 @@ def train_dense_model():
     
     # Save evaluation metrics
     metrics = {
-        'model': 'Dense-only (Flatten→32→16→8→1)',
+        'model': 'Dense-only (6→32→16→8→1) for AQI prediction',
+        'input_features': ['PM2.5', 'PM10', 'NO2', 'SO2', 'CO', 'O3'],
+        'target': 'AQI',
         'parameters': int(model.count_params()),
         'epochs_trained': len(history.history['loss']),
         'best_epoch': int(best_epoch + 1),
@@ -197,6 +192,7 @@ def train_dense_model():
         'test_mae': float(test_mae),
         'seed': SEED
     }
+    os.makedirs("reports", exist_ok=True)
     with open("reports/dense_model_metrics.json", 'w') as f:
         json.dump(metrics, f, indent=2)
     print(f"  Metrics saved to reports/dense_model_metrics.json")
@@ -210,10 +206,10 @@ def convert_dense_to_tflite(model):
     
     # Load representative data
     X_train = np.load("data/train_X.npy")
-    representative_data = X_train[:100]
+    representative_data = X_train[:min(100, len(X_train))]
     
     def representative_dataset():
-        for i in range(100):
+        for i in range(len(representative_data)):
             yield [representative_data[i:i+1].astype(np.float32)]
     
     # Create converter
@@ -280,7 +276,7 @@ def validate_tflite_model(tflite_path):
         output = interpreter.get_tensor(output_details[0]['index'])
         
         print(f"  ✓ Test inference successful")
-        print(f"  ✓ Sample prediction: {output[0][0]:.6f}")
+        print(f"  ✓ Sample prediction (normalized AQI): {output[0][0]:.6f}")
         
         return True
         
@@ -289,7 +285,7 @@ def validate_tflite_model(tflite_path):
         return False
 
 def main():
-    """Main pipeline for Dense TFLite model"""
+    """Main pipeline for Dense TFLite AQI model"""
     
     # Train Dense model
     model = train_dense_model()
@@ -302,11 +298,13 @@ def main():
     
     # Summary
     print("\n" + "=" * 60)
-    print("🎉 DENSE TFLITE MODEL SUMMARY")
+    print("🎉 DENSE TFLITE AQI MODEL SUMMARY")
     print("=" * 60)
     
     print(f"\nModel Details:")
-    print(f"  • Architecture: Dense layers only (TFLite compatible)")
+    print(f"  • Architecture: Dense layers only (6→32→16→8→1)")
+    print(f"  • Input: PM2.5, PM10, NO2, SO2, CO, O3")
+    print(f"  • Output: AQI (normalized)")
     print(f"  • Parameters: {model.count_params():,}")
     print(f"  • File: {tflite_path}")
     print(f"  • Size: {model_size_kb:.1f} KB")

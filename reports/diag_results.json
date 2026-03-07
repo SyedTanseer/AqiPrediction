@@ -1,0 +1,55 @@
+{
+  "raw_values": {
+    "CO_GT": 15,
+    "C6H6_GT": 60,
+    "NOx_GT": 1500,
+    "NO2_GT": 300,
+    "T": 50,
+    "RH": 100,
+    "AH": 3
+  },
+  "z_scores": {
+    "CO_GT": 8.82,
+    "C6H6_GT": 6.38,
+    "NOx_GT": 6.55,
+    "NO2_GT": 4.84,
+    "T": 3.69,
+    "RH": 2.96,
+    "AH": 5.09
+  },
+  "training_ranges": {
+    "CO_GT": {
+      "min": 0.1,
+      "max": 11.9
+    },
+    "C6H6_GT": {
+      "min": 0.2,
+      "max": 63.7
+    },
+    "NOx_GT": {
+      "min": 2.0,
+      "max": 1479.0
+    },
+    "NO2_GT": {
+      "min": 2.0,
+      "max": 333.0
+    },
+    "T": {
+      "min": -1.9,
+      "max": 44.6
+    },
+    "RH": {
+      "min": 9.2,
+      "max": 88.7
+    },
+    "AH": {
+      "min": 0.18,
+      "max": 2.18
+    }
+  },
+  "prediction": {
+    "normalized_output": 2.1727,
+    "denormalized_co_mg_m3": 5.3,
+    "training_co_max": 11.9
+  }
+}

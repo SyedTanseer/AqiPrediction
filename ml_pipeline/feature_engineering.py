@@ -1,9 +1,11 @@
 """
-Feature engineering for time-series air quality data
-Creates sliding windows for GRU model training
+Feature engineering for air quality AQI prediction data
+Handles normalization, train/val/test split, and array preparation
 
-FIX: Normalization stats are now computed on TRAINING data only
-to prevent data leakage from validation/test sets.
+Adapted for cross-sectional Mendeley Indian Cities AQI dataset:
+- No sliding windows (data is not time-series)
+- Each row is a direct sample: 6 input features → AQI target
+- Train-only normalization stats to prevent data leakage
 """
 import numpy as np
 import pandas as pd
@@ -83,66 +85,62 @@ def normalize_dataset(df, stats):
     
     return df_norm
 
-def create_time_series_windows(data, history_window=24, forecast_horizon=1, target_column='CO_GT'):
+def prepare_features_and_target(df, input_features=None, target_column='AQI'):
     """
-    Create sliding windows for time-series prediction
+    Split DataFrame into input features (X) and target (y)
     
     Args:
-        data: DataFrame with time-series data
-        history_window: Number of past timesteps to use as input (24 hours)
-        forecast_horizon: Number of future timesteps to predict (1 hour)
-        target_column: Column to predict
+        df: DataFrame with all columns
+        input_features: List of input feature column names
+        target_column: Target column name
         
     Returns:
-        Tuple of (X, y) where:
-        X shape: (samples, history_window, n_features)
-        y shape: (samples,)
+        Tuple of (X, y) as numpy arrays
     """
-    # Convert to numpy array
-    values = data.values
-    target_idx = data.columns.get_loc(target_column)
+    if input_features is None:
+        input_features = ['PM25', 'PM10', 'NO2', 'SO2', 'CO', 'O3']
     
-    X, y = [], []
+    X = df[input_features].values.astype(np.float32)
+    y = df[target_column].values.astype(np.float32)
     
-    # Create sliding windows
-    for i in range(history_window, len(values) - forecast_horizon + 1):
-        # Input window: past 24 hours of all features
-        X.append(values[i-history_window:i, :])
-        
-        # Target: next hour's CO_GT value
-        y.append(values[i + forecast_horizon - 1, target_idx])
-    
-    X = np.array(X)
-    y = np.array(y)
-    
-    print(f"Created {len(X)} time-series windows")
-    print(f"Input shape: {X.shape}")
-    print(f"Target shape: {y.shape}")
+    print(f"Prepared features: X{X.shape}, y{y.shape}")
+    print(f"  Input features: {input_features}")
+    print(f"  Target: {target_column}")
     
     return X, y
 
-def chronological_split(X, y, train_ratio=0.70, val_ratio=0.15):
+def random_split(X, y, train_ratio=0.70, val_ratio=0.15, seed=42):
     """
-    Split data chronologically (no shuffling to prevent data leakage)
+    Randomly split data into train/val/test sets
     
     Args:
         X: Input features array
         y: Target values array
         train_ratio: Proportion for training (0.70)
         val_ratio: Proportion for validation (0.15)
+        seed: Random seed for reproducibility
         
     Returns:
         Tuple of (X_train, X_val, X_test, y_train, y_val, y_test)
     """
     n = len(X)
+    
+    # Shuffle indices
+    rng = np.random.RandomState(seed)
+    indices = rng.permutation(n)
+    
     train_end = int(n * train_ratio)
     val_end = int(n * (train_ratio + val_ratio))
     
-    X_train, y_train = X[:train_end], y[:train_end]
-    X_val, y_val = X[train_end:val_end], y[train_end:val_end]
-    X_test, y_test = X[val_end:], y[val_end:]
+    train_idx = indices[:train_end]
+    val_idx = indices[train_end:val_end]
+    test_idx = indices[val_end:]
     
-    print(f"\nChronological split (no shuffling):")
+    X_train, y_train = X[train_idx], y[train_idx]
+    X_val, y_val = X[val_idx], y[val_idx]
+    X_test, y_test = X[test_idx], y[test_idx]
+    
+    print(f"\nRandom split (seed={seed}):")
     print(f"  Train: {len(X_train)} samples ({len(X_train)/n:.1%})")
     print(f"  Val:   {len(X_val)} samples ({len(X_val)/n:.1%})")
     print(f"  Test:  {len(X_test)} samples ({len(X_test)/n:.1%})")
@@ -162,63 +160,80 @@ def save_processed_arrays(X_train, X_val, X_test, y_train, y_val, y_test, data_d
     
     print(f"\nArrays saved to {data_dir}/")
 
-def process_time_series_data(csv_path, config_path, data_dir="data", 
-                           history_window=24, forecast_horizon=1):
+def process_data(csv_path, config_path, data_dir="data"):
     """
-    Complete time-series processing pipeline
+    Complete data processing pipeline for cross-sectional AQI data.
     
-    FIX: Normalization stats are computed on TRAINING portion only
+    Normalization stats are computed on TRAINING portion only
     to prevent data leakage from validation/test sets.
     
     Args:
         csv_path: Path to clean dataset CSV
         config_path: Path to normalization.yaml (will be overwritten with train-only stats)
         data_dir: Directory to save processed arrays
-        history_window: Input sequence length
-        forecast_horizon: Prediction horizon
         
     Returns:
         Tuple of processed arrays
     """
-    print("Starting time-series processing pipeline...")
+    print("Starting data processing pipeline...")
     
     # Load clean dataset
-    df = pd.read_csv(csv_path, index_col='datetime', parse_dates=True)
+    df = pd.read_csv(csv_path)
     print(f"Loaded dataset: {df.shape}")
     
-    # ===== FIX: Compute normalization stats on TRAINING portion only =====
-    # Determine the training portion boundary on raw data
-    train_end_idx = int(len(df) * 0.70)
-    df_train_portion = df.iloc[:train_end_idx]
+    # Prepare features and target (before normalization)
+    input_features = ['PM25', 'PM10', 'NO2', 'SO2', 'CO', 'O3']
+    X_raw, y_raw = prepare_features_and_target(df, input_features, 'AQI')
     
-    print(f"\nComputing normalization stats on training data only ({train_end_idx} of {len(df)} rows)...")
-    stats = compute_normalization_stats(df_train_portion)
+    # Random split on raw data
+    X_train_raw, X_val_raw, X_test_raw, y_train, y_val, y_test = random_split(X_raw, y_raw)
     
-    # Save train-only stats (overwrites any previously computed full-data stats)
+    # Compute normalization stats on TRAINING data only
+    print(f"\nComputing normalization stats on training data only ({len(X_train_raw)} samples)...")
+    
+    # Build a DataFrame from training data for stats computation
+    all_columns = input_features + ['AQI']
+    train_df = pd.DataFrame(
+        np.column_stack([X_train_raw, y_train]),
+        columns=all_columns
+    )
+    stats = compute_normalization_stats(train_df)
     save_normalization_stats(stats, config_path)
     
     for col, s in stats.items():
         print(f"  {col}: mean={s['mean']:.4f}, std={s['std']:.4f}")
-    # =====================================================================
     
-    # Normalize ALL data using train-only stats
-    df_norm = normalize_dataset(df, stats)
-    print("Dataset normalized (using train-only statistics)")
+    # Normalize ALL features using train-only stats (input features only)
+    input_stats = {col: stats[col] for col in input_features}
     
-    # Create time-series windows
-    X, y = create_time_series_windows(df_norm, history_window, forecast_horizon)
+    # Normalize input features
+    X_train = np.array([(X_train_raw[:, i] - input_stats[col]['mean']) / input_stats[col]['std'] 
+                        for i, col in enumerate(input_features)]).T.astype(np.float32)
+    X_val = np.array([(X_val_raw[:, i] - input_stats[col]['mean']) / input_stats[col]['std'] 
+                      for i, col in enumerate(input_features)]).T.astype(np.float32)
+    X_test = np.array([(X_test_raw[:, i] - input_stats[col]['mean']) / input_stats[col]['std'] 
+                       for i, col in enumerate(input_features)]).T.astype(np.float32)
     
-    # Chronological split
-    X_train, X_val, X_test, y_train, y_val, y_test = chronological_split(X, y)
+    # Normalize target (AQI) using train-only AQI stats
+    aqi_mean = stats['AQI']['mean']
+    aqi_std = stats['AQI']['std']
+    y_train_norm = ((y_train - aqi_mean) / aqi_std).astype(np.float32)
+    y_val_norm = ((y_val - aqi_mean) / aqi_std).astype(np.float32)
+    y_test_norm = ((y_test - aqi_mean) / aqi_std).astype(np.float32)
+    
+    print(f"\nNormalized shapes:")
+    print(f"  X_train: {X_train.shape}, y_train: {y_train_norm.shape}")
+    print(f"  X_val:   {X_val.shape}, y_val:   {y_val_norm.shape}")
+    print(f"  X_test:  {X_test.shape}, y_test:  {y_test_norm.shape}")
     
     # Save processed arrays
-    save_processed_arrays(X_train, X_val, X_test, y_train, y_val, y_test, data_dir)
+    save_processed_arrays(X_train, X_val, X_test, y_train_norm, y_val_norm, y_test_norm, data_dir)
     
-    print("\nTime-series processing complete!")
-    return X_train, X_val, X_test, y_train, y_val, y_test
+    print("\nData processing complete!")
+    return X_train, X_val, X_test, y_train_norm, y_val_norm, y_test_norm
 
 if __name__ == "__main__":
-    process_time_series_data(
+    process_data(
         csv_path="../data/clean_dataset.csv",
         config_path="../config/normalization.yaml",
         data_dir="../data"

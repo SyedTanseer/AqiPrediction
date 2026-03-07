@@ -1,39 +1,38 @@
 """
-GRU neural network architecture for edge-based air quality prediction
-Optimized for ESP32 deployment with TensorFlow Lite Micro
+Dense neural network architecture for edge-based AQI prediction
+Optimized for ESP32 deployment with TensorFlow Lite
+Input: 6 pollutant features (PM2.5, PM10, NO2, SO2, CO, O3)
+Output: AQI value (normalized)
 """
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import GRU, Dense, Dropout
+from tensorflow.keras.layers import Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 import numpy as np
 
-def create_gru_model(input_shape=(24, 4), gru_units=16, dropout_rate=0.2):
+def create_dense_model(input_shape=(6,), hidden_units=[32, 16, 8], dropout_rate=0.2):
     """
-    Create lightweight GRU model for edge deployment
+    Create lightweight Dense model for edge deployment
     
     Args:
-        input_shape: Input tensor shape (timesteps, features)
-        gru_units: Number of GRU units (keep small for ESP32)
+        input_shape: Input tensor shape (6 features)
+        hidden_units: List of hidden layer sizes
         dropout_rate: Dropout rate for regularization
         
     Returns:
         Compiled Keras model
     """
     model = Sequential([
-        # Input layer - expects (batch_size, 24, 4)
-        GRU(gru_units, 
-            input_shape=input_shape,
-            return_sequences=False,  # Only return last output
-            name='gru_layer'),
+        # Hidden layers
+        Dense(hidden_units[0], activation='relu', input_shape=input_shape, name='dense1'),
+        Dropout(dropout_rate, name='dropout1'),
         
-        # Dropout for regularization
-        Dropout(dropout_rate, name='dropout'),
+        Dense(hidden_units[1], activation='relu', name='dense2'),
+        Dropout(dropout_rate, name='dropout2'),
         
-        # Small dense layer with ReLU activation
-        Dense(8, activation='relu', name='dense_hidden'),
+        Dense(hidden_units[2], activation='relu', name='dense3'),
         
-        # Output layer - single CO_GT prediction
+        # Output layer - single AQI prediction
         Dense(1, activation='linear', name='output')
     ])
     
@@ -87,15 +86,15 @@ def get_model_info(model):
 
 def create_and_compile_model():
     """
-    Create and compile the complete GRU model
+    Create and compile the complete Dense model
     
     Returns:
         Compiled model ready for training
     """
-    print("Creating lightweight GRU model for edge deployment...")
+    print("Creating lightweight Dense model for edge AQI prediction...")
     
     # Create model
-    model = create_gru_model()
+    model = create_dense_model()
     
     # Compile model
     model = compile_model(model)
@@ -137,12 +136,12 @@ def create_and_compile_model():
     layer_names = [layer.name for layer in model.layers]
     
     checks = [
-        ('gru_layer' in layer_names, "GRU layer present"),
-        ('dropout' in layer_names, "Dropout layer present"), 
-        ('dense_hidden' in layer_names, "Hidden dense layer present"),
+        ('dense1' in layer_names, "Dense input layer present"),
+        ('dropout1' in layer_names, "Dropout layer present"), 
+        ('dense2' in layer_names, "Second dense layer present"),
+        ('dense3' in layer_names, "Third dense layer present"),
         ('output' in layer_names, "Output layer present"),
-        (model.layers[0].units == 16, "GRU has 16 units"),
-        (model.input_shape == (None, 24, 4), "Input shape is (24,4)")
+        (model.input_shape == (None, 6), "Input shape is (6,) — 6 pollutant features"),
     ]
     
     for check, description in checks:
@@ -165,8 +164,8 @@ def test_model_prediction():
     # Create model
     model = create_and_compile_model()
     
-    # Create dummy input (batch_size=1, timesteps=24, features=4)
-    dummy_input = np.random.randn(1, 24, 4)
+    # Create dummy input (batch_size=1, features=6)
+    dummy_input = np.random.randn(1, 6)
     
     # Test prediction
     try:
@@ -181,21 +180,20 @@ def test_model_prediction():
         return False
 
 if __name__ == "__main__":
-    print("GRU Model Architecture for Edge-based Air Quality Prediction")
+    print("Dense Model Architecture for Edge-based AQI Prediction")
     print("="*60)
     
     # Test model creation and functionality
     success = test_model_prediction()
     
     if success:
-        print("\n🎉 Step 4 Success Criteria Met:")
-        print("✔ GRU model file created")
-        print("✔ Input shape = (24,4)")
-        print("✔ GRU layer = 16 units") 
+        print("\n🎉 Model Creation Success:")
+        print("✔ Dense model file created")
+        print("✔ Input shape = (6,) — PM2.5, PM10, NO2, SO2, CO, O3")
+        print("✔ Dense layers: 32→16→8→1")
         print("✔ Dropout added")
-        print("✔ Dense layers added")
         print("✔ Model compiles successfully")
-        print("✔ Parameter count under ~3K")
-        print("\n🚀 Ready for Step 5: Model Training!")
+        print("✔ Direct AQI prediction output")
+        print("\n🚀 Ready for training!")
     else:
         print("\n❌ Model creation failed!")

@@ -1,13 +1,13 @@
 {
   "dense_tflite": {
-    "mse": 0.16608965893140076,
-    "rmse": 0.4075409904922458,
-    "mae": 0.3113574544827171,
-    "r2": 0.7874008626909182,
-    "max_error": 1.6804987600440113,
+    "mse": 0.16295834531046438,
+    "rmse": 0.4036809944875587,
+    "mae": 0.3025386920127585,
+    "r2": 0.7914090265870836,
+    "max_error": 1.7823784030802132,
     "num_samples": 1123,
     "model_name": "Dense-TFLite",
     "model_path": "../model\\dense_model.tflite",
-    "model_size_bytes": 9248
+    "model_size_bytes": 11552
   }
 }
